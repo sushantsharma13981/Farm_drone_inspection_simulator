@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Farm Drone Inspection System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🚁 Farm Drone Inspection System</h1>
+                <div class="connection-status">
+                    <span class="status-indicator" id="connectionStatus"></span>
+                    <span id="connectionText">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel: Client-Side Application -->
+            <div class="panel client-panel">
+                <h2 class="panel-title">CLIENT-SIDE APPLICATION</h2>
+                
+                <!-- Add Farm Section -->
+                <div class="section add-farm-section">
+                    <h3>Add Farm</h3>
+                    <div class="farm-input-group">
+                        <input type="text" id="farmName" placeholder="Farm Name" class="input-field">
+                        <input type="text" id="farmLocation" placeholder="Location" class="input-field">
+                    </div>
+                    
+                    <div class="farm-map-container">
+                        <div class="map-placeholder" id="farmMap">
+                            <div class="map-icon">📍</div>
+                            <p>Click "DRAW" to set boundaries</p>
+                        </div>
+                        <canvas id="mapCanvas" width="280" height="200"></canvas>
+                    </div>
+                    
+                    <div class="boundary-inputs">
+                        <div class="boundary-row">
+                            <label>Min X:</label>
+                            <input type="number" id="minX" value="-2" step="0.5" class="small-input">
+                            <label>Max X:</label>
+                            <input type="number" id="maxX" value="2" step="0.5" class="small-input">
+                        </div>
+                        <div class="boundary-row">
+                            <label>Min Y:</label>
+                            <input type="number" id="minY" value="-2" step="0.5" class="small-input">
+                            <label>Max Y:</label>
+                            <input type="number" id="maxY" value="2" step="0.5" class="small-input">
+                        </div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button class="btn btn-secondary" id="drawBtn">DRAW</button>
+                        <button class="btn btn-primary" id="saveBtn">SAVE</button>
+                    </div>
+                </div>
+
+                <!-- Monitor Farm Section -->
+                <div class="section monitor-farm-section">
+                    <h3>Monitor Farm</h3>
+                    <div class="farms-list" id="farmsList">
+                        <p class="no-farms">No farms added yet</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Panel: 3D Simulator -->
+            <div class="panel simulator-panel">
+                <h2 class="panel-title">3D SIMULATOR</h2>
+                
+                <div class="simulator-display">
+                    <div class="simulator-placeholder">
+                        <div class="drone-icon">🚁</div>
+                        <p>PyBullet Simulation Running</p>
+                        <p class="small-text">View in PyBullet GUI window</p>
+                    </div>
+                </div>
+
+                <div class="simulator-info">
+                    <div class="info-item">
+                        <span class="info-label">Status:</span>
+                        <span class="info-value" id="droneStatus">IDLE</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Position:</span>
+                        <span class="info-value" id="dronePosition">(0.0, 0.0, 0.0)</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Waypoint:</span>
+                        <span class="info-value" id="droneWaypoint">0 / 0</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Active Farm:</span>
+                        <span class="info-value" id="activeFarm">None</span>
+                    </div>
+                </div>
+
+                <div class="simulator-controls">
+                    <button class="btn btn-success" id="deployBtn" disabled>
+                        <span class="btn-icon">🚀</span> DEPLOY DRONE
+                    </button>
+                    <button class="btn btn-warning" id="stallBtn" disabled>
+                        <span class="btn-icon">⏸</span> STALL DRONE
+                    </button>
+                    <button class="btn btn-danger" id="abortBtn" disabled>
+                        <span class="btn-icon">🛑</span> ABORT DRONE
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Panel: Server-Side -->
+            <div class="panel server-panel">
+                <h2 class="panel-title">SERVER-SIDE</h2>
+                
+                <div class="section">
+                    <h3>Flask Web API</h3>
+                    <div class="api-status">
+                        <div class="api-indicator">
+                            <span class="dot"></span>
+                            <span>API Server Active</span>
+                        </div>
+                        <p class="api-url">http://localhost:5000</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Farm Database</h3>
+                    <div class="database-info">
+                        <div class="db-stat">
+                            <span class="db-label">Total Farms:</span>
+                            <span class="db-value" id="totalFarms">0</span>
+                        </div>
+                        <div class="db-stat">
+                            <span class="db-label">Active Missions:</span>
+                            <span class="db-value" id="activeMissions">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Camera Feed</h3>
+                    <div class="camera-feed">
+                        <div class="camera-placeholder">
+                            <div class="camera-icon">📹</div>
+                            <p>Live Feed</p>
+                            <p class="small-text">Drone Camera View</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>System Log</h3>
+                    <div class="log-container" id="systemLog">
+                        <div class="log-entry">System initialized</div>
+                        <div class="log-entry">Waiting for commands...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
