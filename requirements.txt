@@ -1,0 +1,12 @@
+flask==3.0.0
+flask-cors==4.0.0
+pybullet==3.2.5
+numpy==1.24.3
+scipy==1.11.3
+opencv-python==4.8.1.78
+
+# Optional AI Dependencies (for disease detection)
+# Uncomment to enable AI features:
+# torch>=2.0.0
+# torchvision>=0.15.0
+# ultralytics>=8.0.0

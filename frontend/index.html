@@ -11,7 +11,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1>🚁 Farm Drone Inspection System</h1>
+                <h1>🚀 Farm Drone Inspection System</h1>
                 <div class="connection-status">
                     <span class="status-indicator" id="connectionStatus"></span>
                     <span id="connectionText">Connecting...</span>
@@ -77,7 +77,7 @@
                 
                 <div class="simulator-display">
                     <div class="simulator-placeholder">
-                        <div class="drone-icon">🚁</div>
+                        <div class="drone-icon">🚀</div>
                         <p>PyBullet Simulation Running</p>
                         <p class="small-text">View in PyBullet GUI window</p>
                     </div>
@@ -100,6 +100,10 @@
                         <span class="info-label">Active Farm:</span>
                         <span class="info-value" id="activeFarm">None</span>
                     </div>
+                    <div class="info-item" id="aiDetectionRow" style="display: none;">
+                        <span class="info-label">AI Detection:</span>
+                        <span class="info-value" id="aiDetection">N/A</span>
+                    </div>
                 </div>
 
                 <div class="simulator-controls">
@@ -115,9 +119,9 @@
                 </div>
             </div>
 
-            <!-- Right Panel: Server-Side -->
+            <!-- Right Panel: Server-Side & Results -->
             <div class="panel server-panel">
-                <h2 class="panel-title">SERVER-SIDE</h2>
+                <h2 class="panel-title">SERVER-SIDE & RESULTS</h2>
                 
                 <div class="section">
                     <h3>Flask Web API</h3>
@@ -131,37 +135,59 @@
                 </div>
 
                 <div class="section">
-                    <h3>Farm Database</h3>
-                    <div class="database-info">
-                        <div class="db-stat">
-                            <span class="db-label">Total Farms:</span>
-                            <span class="db-value" id="totalFarms">0</span>
-                        </div>
-                        <div class="db-stat">
-                            <span class="db-label">Active Missions:</span>
-                            <span class="db-value" id="activeMissions">0</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="section">
                     <h3>Camera Feed</h3>
                     <div class="camera-feed">
-                        <div class="camera-placeholder">
+                        <img id="cameraStream" class="camera-stream" alt="Drone Camera" />
+                        <div class="camera-placeholder" id="cameraPlaceholder">
                             <div class="camera-icon">📹</div>
                             <p>Live Feed</p>
-                            <p class="small-text">Drone Camera View</p>
+                            <p class="small-text">Waiting for deployment...</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="section">
-                    <h3>System Log</h3>
-                    <div class="log-container" id="systemLog">
-                        <div class="log-entry">System initialized</div>
-                        <div class="log-entry">Waiting for commands...</div>
+                <!-- Results Section -->
+                <div class="section results-section" style="display: none;" id="resultsSection">
+                    <h3>Mission Results</h3>
+                    <div class="results-tabs">
+                        <button class="results-tab-btn active" data-tab="summary">Summary</button>
+                        <button class="results-tab-btn" data-tab="heatmap">Heatmap</button>
+                        <button class="results-tab-btn" data-tab="detections">Detections</button>
+                    </div>
+                    
+                    <!-- Summary Tab -->
+                    <div class="results-tab-content active" id="summary-tab">
+                        <div id="resultsSummary" class="results-summary">
+                            <p class="loading">Loading results...</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Heatmap Tab -->
+                    <div class="results-tab-content" id="heatmap-tab">
+                        <img id="heatmapImage" class="heatmap-image" alt="Disease Heatmap" />
+                    </div>
+                    
+                    <!-- Detections Tab -->
+                    <div class="results-tab-content" id="detections-tab">
+                        <div id="detectionsTable" class="detections-table">
+                            <p class="loading">Loading detections...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="results-actions">
+                        <button class="btn btn-primary btn-sm" id="exportBtn">📥 Export JSON</button>
+                        <button class="btn btn-secondary btn-sm" id="clearResultsBtn">🗑️ Clear</button>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Bottom Panel: System Log -->
+        <div class="panel log-panel">
+            <h2 class="panel-title">SYSTEM LOG</h2>
+            <div class="log-container" id="systemLog">
+                <div class="log-entry">System initialized</div>
+                <div class="log-entry">Waiting for commands...</div>
             </div>
         </div>
     </div>

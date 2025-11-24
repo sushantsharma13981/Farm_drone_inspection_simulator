@@ -1,0 +1,258 @@
+<?xml version="1.0"?>
+<robot name="tomato_plant_v2">
+
+  <!-- ================= MATERIALS ================= -->
+  <material name="grow_bag_white">
+    <color rgba="0.9 0.9 0.9 1"/>
+  </material>
+  <material name="plant_green">
+    <color rgba="0.13 0.35 0.13 1"/>
+  </material>
+  <material name="leaf_green">
+    <color rgba="0.2 0.5 0.2 1"/>
+  </material>
+  <material name="tomato_red">
+    <color rgba="0.8 0.1 0.1 1"/>
+  </material>
+
+  <!-- ================= BASE: GROW BAG ================= -->
+  <!-- Modeled after the white blocks in your image -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.4 0.15 0.1"/>
+      </geometry>
+      <material name="grow_bag_white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.4 0.15 0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="5.0"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+
+  <!-- ================= MAIN STEM ================= -->
+  <!-- Tall vertical vine, approx 1.5m -->
+  <link name="stem">
+    <visual>
+      <origin xyz="0 0 0.75" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="1.5" radius="0.012"/>
+      </geometry>
+      <material name="plant_green"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.75" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="1.5" radius="0.012"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.005"/>
+    </inertial>
+  </link>
+
+  <joint name="bag_to_stem" type="fixed">
+    <parent link="base_link"/>
+    <child link="stem"/>
+    <origin xyz="0 0 0.05"/>
+  </joint>
+
+  <!-- ================= LEAVES (Spiraling Up) ================= -->
+  
+  <!-- Leaf 1: Low -->
+  <link name="leaf_01">
+    <visual>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.3 0.12 0.002"/>
+      </geometry>
+      <material name="leaf_green"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.3 0.12 0.002"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_leaf_01" type="fixed">
+    <parent link="stem"/>
+    <child link="leaf_01"/>
+    <origin xyz="0 0 0.3" rpy="0 0.4 0"/>
+  </joint>
+
+  <!-- Leaf 2: Mid-Low, rotated 90 deg -->
+  <link name="leaf_02">
+    <visual>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.28 0.1 0.002"/>
+      </geometry>
+      <material name="leaf_green"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.28 0.1 0.002"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_leaf_02" type="fixed">
+    <parent link="stem"/>
+    <child link="leaf_02"/>
+    <origin xyz="0 0 0.5" rpy="0 0.3 1.57"/>
+  </joint>
+
+  <!-- Leaf 3: Mid, rotated 180 deg -->
+  <link name="leaf_03">
+    <visual>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.3 0.12 0.002"/>
+      </geometry>
+      <material name="leaf_green"/>
+    </visual>
+    <collision>
+      <geometry>
+         <box size="0.3 0.12 0.002"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_leaf_03" type="fixed">
+    <parent link="stem"/>
+    <child link="leaf_03"/>
+    <origin xyz="0 0 0.7" rpy="0 0.2 3.14"/>
+  </joint>
+
+  <!-- Leaf 4: Mid-High, rotated 270 deg -->
+  <link name="leaf_04">
+    <visual>
+      <origin xyz="0.15 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.25 0.1 0.002"/>
+      </geometry>
+      <material name="leaf_green"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.25 0.1 0.002"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_leaf_04" type="fixed">
+    <parent link="stem"/>
+    <child link="leaf_04"/>
+    <origin xyz="0 0 0.9" rpy="0 0.3 4.71"/>
+  </joint>
+
+  <!-- Leaf 5: High -->
+  <link name="leaf_05">
+    <visual>
+      <origin xyz="0.12 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.2 0.08 0.002"/>
+      </geometry>
+      <material name="leaf_green"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.2 0.08 0.002"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_leaf_05" type="fixed">
+    <parent link="stem"/>
+    <child link="leaf_05"/>
+    <origin xyz="0 0 1.1" rpy="0 0.5 0.5"/>
+  </joint>
+
+   <!-- Leaf 6: Top -->
+  <link name="leaf_06">
+    <visual>
+      <origin xyz="0.12 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.2 0.08 0.002"/>
+      </geometry>
+      <material name="leaf_green"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.2 0.08 0.002"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_leaf_06" type="fixed">
+    <parent link="stem"/>
+    <child link="leaf_06"/>
+    <origin xyz="0 0 1.3" rpy="0 0.5 3.5"/>
+  </joint>
+
+  <!-- ================= FRUIT CLUSTERS ================= -->
+  
+  <!-- Cluster 1 -->
+  <link name="fruit_cluster_01">
+    <visual>
+      <geometry>
+        <sphere radius="0.035"/>
+      </geometry>
+      <material name="tomato_red"/>
+    </visual>
+    <inertial>
+       <mass value="0.05"/>
+       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_fruit_01" type="fixed">
+    <parent link="stem"/>
+    <child link="fruit_cluster_01"/>
+    <origin xyz="0.06 0.06 0.6"/>
+  </joint>
+
+  <!-- Cluster 2 -->
+  <link name="fruit_cluster_02">
+    <visual>
+      <geometry>
+        <sphere radius="0.03"/>
+      </geometry>
+      <material name="tomato_red"/>
+    </visual>
+    <inertial>
+       <mass value="0.05"/>
+       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="joint_fruit_02" type="fixed">
+    <parent link="stem"/>
+    <child link="fruit_cluster_02"/>
+    <origin xyz="-0.06 0.04 0.85"/>
+  </joint>
+
+</robot>

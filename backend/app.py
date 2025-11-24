@@ -1,24 +1,22 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 import threading
 import queue
 import time
 import json
-import numpy as np
-import pybullet as p
-import pybullet_data
 import os
-import random
-import math
+import cv2
+import base64
+import numpy as np
 
-# Import your existing drone modules
-from DSLPIDControl import DSLPIDControl
-from enums import DroneModel
+# Import the integrated drone simulator
+from drone_sweeper import run_drone_simulation_flask
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 CORS(app)
 
-# Global state management
+# ================= GLOBAL STATE =================
+
 class DroneSimulatorState:
     def __init__(self):
         self.is_running = False
@@ -27,18 +25,21 @@ class DroneSimulatorState:
         self.current_position = [0, 0, 0]
         self.current_waypoint = 0
         self.total_waypoints = 0
-        self.status = "idle"  # idle, deploying, flying, stalled, completed, aborted
+        self.status = "idle"
         self.simulation_thread = None
         self.command_queue = queue.Queue()
         self.farms = []
         self.current_farm = None
-        
-sim_state = DroneSimulatorState()
+        self.camera_frame = None
+        self.camera_lock = threading.Lock()
+        self.ai_diagnosis = "SCANNING..."
+        self.ai_confidence = 0.0
+        self.disease_map = None  # DiseaseDetectionMap object
 
-# Database simulation (in-memory for now)
+sim_state = DroneSimulatorState()
 farms_db = []
 
-# ============= API ROUTES =============
+# ================= API ROUTES =================
 
 @app.route('/')
 def serve_frontend():
@@ -101,7 +102,10 @@ def get_drone_status():
             'current_waypoint': sim_state.current_waypoint,
             'total_waypoints': sim_state.total_waypoints,
             'status': sim_state.status,
-            'current_farm': sim_state.current_farm
+            'current_farm': sim_state.current_farm,
+            'ai_diagnosis': sim_state.ai_diagnosis,
+            'ai_confidence': sim_state.ai_confidence,
+            'ai_available': True
         }
     })
 
@@ -130,8 +134,8 @@ def deploy_drone():
     
     # Start simulation in a separate thread
     sim_state.simulation_thread = threading.Thread(
-        target=run_drone_simulation,
-        args=(farm,),
+        target=run_drone_simulation_flask,
+        args=(farm, sim_state),
         daemon=True
     )
     sim_state.simulation_thread.start()
@@ -144,7 +148,7 @@ def deploy_drone():
 
 @app.route('/api/drone/stall', methods=['POST'])
 def stall_drone():
-    """Pause/stall the drone"""
+    """Pause/resume the drone"""
     if not sim_state.is_running:
         return jsonify({
             'success': False,
@@ -176,253 +180,138 @@ def abort_drone():
         'message': 'Mission abort initiated'
     })
 
-# ============= HELPER FUNCTIONS FROM DRONE_SWEEPER =============
+@app.route('/api/camera/stream')
+def camera_stream():
+    """Stream camera feed as MJPEG"""
+    def generate():
+        while True:
+            with sim_state.camera_lock:
+                if sim_state.camera_frame is not None:
+                    _, buffer = cv2.imencode('.jpg', sim_state.camera_frame)
+                    frame = buffer.tobytes()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.033)  # ~30 FPS
+    
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-def setup_simulation(drone_urdf_path):
-    """Setup PyBullet simulation"""
-    print("Connecting to PyBullet...")
-    if p.isConnected():
-        p.disconnect()
-    p.connect(p.GUI)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+@app.route('/api/camera/frame')
+def camera_frame():
+    """Get single camera frame as base64"""
+    with sim_state.camera_lock:
+        if sim_state.camera_frame is not None:
+            _, buffer = cv2.imencode('.jpg', sim_state.camera_frame)
+            img_base64 = base64.b64encode(buffer).decode('utf-8')
+            return jsonify({
+                'success': True,
+                'frame': img_base64
+            })
     
-    p.setGravity(0, 0, -9.81)
-    p.setPhysicsEngineParameter(fixedTimeStep=1.0/240.0)
-    planeId = p.loadURDF("plane.urdf")
-    
-    print(f"Loading drone from {drone_urdf_path}...")
-    start_pos = [0, 0, 0.1]
-    start_orn = p.getQuaternionFromEuler([0, 0, 0])
-    droneId = p.loadURDF(drone_urdf_path, start_pos, start_orn)
-    
-    return droneId, planeId
+    return jsonify({
+        'success': False,
+        'message': 'No camera frame available'
+    })
 
-def draw_field_boundaries(min_corner, max_corner, z=0.01):
-    """Draw field boundaries in PyBullet"""
-    x_min, y_min = min_corner
-    x_max, y_max = max_corner
-    c0, c1 = [x_min, y_min, z], [x_max, y_min, z]
-    c2, c3 = [x_max, y_max, z], [x_min, y_max, z]
-    color = [0, 1, 0]
-    p.addUserDebugLine(c0, c1, color, lineWidth=3)
-    p.addUserDebugLine(c1, c2, color, lineWidth=3)
-    p.addUserDebugLine(c2, c3, color, lineWidth=3)
-    p.addUserDebugLine(c3, c0, color, lineWidth=3)
+# ================= RESULTS API =================
 
-def setup_field(field_min_corner, field_max_corner, num_bad_crops=10):
-    """Setup field with bad crops"""
-    print(f"Planting {num_bad_crops} bad crops...")
-    for _ in range(num_bad_crops):
-        x = random.uniform(field_min_corner[0], field_max_corner[0])
-        y = random.uniform(field_min_corner[1], field_max_corner[1])
-        pos = [x, y, 0.05]
-        vs_id = p.createVisualShape(p.GEOM_SPHERE, radius=0.05, rgbaColor=[1, 0, 0, 1])
-        p.createMultiBody(basePosition=pos, baseCollisionShapeIndex=-1, baseVisualShapeIndex=vs_id)
+@app.route('/api/results/summary', methods=['GET'])
+def get_results_summary():
+    """Get disease detection summary"""
+    if sim_state.disease_map is None:
+        return jsonify({
+            'success': False,
+            'message': 'No mission data available'
+        }), 404
+    
+    summary = sim_state.disease_map.get_summary()
+    
+    return jsonify({
+        'success': True,
+        'summary': summary,
+        'total_detections': len(sim_state.disease_map.detections)
+    })
 
-def get_sweep_waypoints(field_min, field_max, z_hover, sweep_step=0.5):
-    """Generate sweep waypoints for the field"""
-    waypoints = []
-    # 1. Takeoff (Straight up)
-    waypoints.append(np.array([0, 0, z_hover]))
+@app.route('/api/results/detections', methods=['GET'])
+def get_all_detections():
+    """Get all individual detections"""
+    if sim_state.disease_map is None:
+        return jsonify({
+            'success': False,
+            'message': 'No mission data available'
+        }), 404
     
-    # 2. Move to Start Corner
-    waypoints.append(np.array([field_min[0], field_min[1], z_hover]))
+    detections = sim_state.disease_map.get_all_detections()
+    
+    return jsonify({
+        'success': True,
+        'detections': detections
+    })
 
-    x_min, y_min = field_min
-    x_max, y_max = field_max
+@app.route('/api/results/heatmap', methods=['GET'])
+def get_heatmap():
+    """Get disease heatmap as image"""
+    if sim_state.disease_map is None:
+        return jsonify({
+            'success': False,
+            'message': 'No mission data available'
+        }), 404
     
-    current_y = y_min
-    going_right = True
+    heatmap = sim_state.disease_map.create_heatmap_image(600, 600)
+    _, buffer = cv2.imencode('.png', heatmap)
+    img_base64 = base64.b64encode(buffer).decode('utf-8')
     
-    while current_y <= y_max:
-        x_start = x_min if going_right else x_max
-        x_end   = x_max if going_right else x_min
-        
-        # Row endpoints
-        waypoints.append(np.array([x_start, current_y, z_hover]))
-        waypoints.append(np.array([x_end,   current_y, z_hover]))
-        
-        # Move to next row
-        current_y += sweep_step
-        if current_y <= y_max + sweep_step:
-            waypoints.append(np.array([x_end, current_y, z_hover]))
-            
-        going_right = not going_right
+    return jsonify({
+        'success': True,
+        'heatmap': img_base64
+    })
 
-    # 3. Return Home and LAND
-    waypoints.append(np.array([0, 0, z_hover])) # Return to home (High)
-    waypoints.append(np.array([0, 0, 0.05]))    # LAND (Low)
+@app.route('/api/results/export', methods=['GET'])
+def export_results():
+    """Export results as JSON"""
+    if sim_state.disease_map is None:
+        return jsonify({
+            'success': False,
+            'message': 'No mission data available'
+        }), 404
     
-    return waypoints
+    summary = sim_state.disease_map.get_summary()
+    detections = sim_state.disease_map.get_all_detections()
+    
+    report = {
+        'mission_info': {
+            'farm': sim_state.current_farm['name'] if sim_state.current_farm else 'Unknown',
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': sim_state.status
+        },
+        'summary': summary,
+        'total_detections': len(detections),
+        'detections': detections
+    }
+    
+    return jsonify(report)
 
-# ============= DRONE SIMULATION =============
+@app.route('/api/results/clear', methods=['POST'])
+def clear_results():
+    """Clear all mission results"""
+    sim_state.disease_map = None
+    
+    return jsonify({
+        'success': True,
+        'message': 'Results cleared'
+    })
 
-def run_drone_simulation(farm):
-    """Run the drone simulation with the given farm parameters"""
-    sim_state.is_running = True
-    sim_state.status = "flying"
-    sim_state.current_waypoint = 0
-    
-    try:
-        # Extract farm boundaries
-        bounds = farm['boundaries']
-        field_min = [bounds['min_x'], bounds['min_y']]
-        field_max = [bounds['max_x'], bounds['max_y']]
-        
-        # Setup simulation
-        drone_id, _ = setup_simulation("cf2p.urdf")
-        sim_state.drone_id = drone_id
-        draw_field_boundaries(field_min, field_max)
-        setup_field(field_min, field_max, num_bad_crops=10)
-        
-        # Generate waypoints
-        HOVER_ALTITUDE = 1.0
-        SWEEP_STEP = 0.75
-        CRUISE_SPEED = 0.5
-        WAIT_TIME_AT_CORNER = 1.5
-        CTRL_TIMESTEP = 1.0 / 48.0
-        SIM_HZ = 240.0
-        CTRL_HZ = 48.0
-        SIM_STEPS = int(SIM_HZ / CTRL_HZ)
-        
-        waypoints = get_sweep_waypoints(field_min, field_max, HOVER_ALTITUDE, SWEEP_STEP)
-        sim_state.total_waypoints = len(waypoints)
-        
-        ctrl = DSLPIDControl(drone_model=DroneModel.CF2P)
-        
-        # Trajectory state
-        current_wp_idx = 0
-        virtual_pos = np.array([0.0, 0.0, 0.1])
-        target_vel = np.zeros(3)
-        wait_timer = 0.0
-        is_waiting = False
-        
-        print(f"[SERVER] Starting mission for {farm['name']}")
-        
-        abort_initiated = False
-        return_home_waypoints = None
-        
-        while current_wp_idx < len(waypoints):
-            # Check for abort command
-            try:
-                cmd = sim_state.command_queue.get_nowait()
-                if cmd == 'abort' and not abort_initiated:
-                    print("[SERVER] Mission aborted by user - Returning to home")
-                    sim_state.status = "returning_home"
-                    abort_initiated = True
-                    
-                    # Get current position
-                    cur_pos_abort, _ = p.getBasePositionAndOrientation(drone_id)
-                    
-                    # Create return home waypoints: current position -> home at hover altitude -> land
-                    return_home_waypoints = [
-                        np.array([cur_pos_abort[0], cur_pos_abort[1], HOVER_ALTITUDE]),
-                        np.array([0, 0, HOVER_ALTITUDE]),
-                        np.array([0, 0, 0.05])
-                    ]
-                    
-                    # Reset waypoint tracking for return journey
-                    waypoints = return_home_waypoints
-                    current_wp_idx = 0
-                    virtual_pos = np.array([cur_pos_abort[0], cur_pos_abort[1], cur_pos_abort[2]])
-                    is_waiting = False
-                    wait_timer = 0.0
-                    
-                    print(f"[SERVER] Return home path set: {len(return_home_waypoints)} waypoints")
-            except queue.Empty:
-                pass
-            
-            # Handle pause/stall
-            while sim_state.is_paused:
-                time.sleep(0.1)
-                continue
-            
-            # Get drone state
-            cur_pos, cur_quat = p.getBasePositionAndOrientation(drone_id)
-            cur_vel, cur_ang_vel = p.getBaseVelocity(drone_id)
-            
-            # Update global state
-            sim_state.current_position = list(cur_pos)
-            sim_state.current_waypoint = current_wp_idx
-            
-            # Update virtual target
-            goal = waypoints[current_wp_idx]
-            vector_to_goal = goal - virtual_pos
-            dist_to_goal = np.linalg.norm(vector_to_goal)
-            
-            if is_waiting:
-                target_vel = np.zeros(3)
-                wait_timer += CTRL_TIMESTEP
-                drone_dist = np.linalg.norm(np.array(cur_pos) - virtual_pos)
-                
-                if wait_timer >= WAIT_TIME_AT_CORNER and drone_dist < 0.2:
-                    is_waiting = False
-                    current_wp_idx += 1
-                    wait_timer = 0.0
-            
-            elif dist_to_goal < 0.05:
-                is_waiting = True
-                target_vel = np.zeros(3)
-                virtual_pos = goal
-            
-            else:
-                direction = vector_to_goal / dist_to_goal
-                target_vel = direction * CRUISE_SPEED
-                virtual_pos += target_vel * CTRL_TIMESTEP
-            
-            # Controller
-            rpm, _, _ = ctrl.computeControl(
-                control_timestep=CTRL_TIMESTEP,
-                cur_pos=np.array(cur_pos),
-                cur_quat=np.array(cur_quat),
-                cur_vel=np.array(cur_vel),
-                cur_ang_vel=np.array(cur_ang_vel),
-                target_pos=virtual_pos,
-                target_vel=target_vel
-            )
-            
-            # Physics
-            forces = ctrl.KF * (rpm**2)
-            for _ in range(SIM_STEPS):
-                p.applyExternalForce(drone_id, 0, [0, 0, forces[0]], [0, 0, 0], p.LINK_FRAME)
-                p.applyExternalForce(drone_id, 1, [0, 0, forces[1]], [0, 0, 0], p.LINK_FRAME)
-                p.applyExternalForce(drone_id, 2, [0, 0, forces[2]], [0, 0, 0], p.LINK_FRAME)
-                p.applyExternalForce(drone_id, 3, [0, 0, forces[3]], [0, 0, 0], p.LINK_FRAME)
-                p.stepSimulation()
-                time.sleep(1.0 / SIM_HZ)
-        
-        if abort_initiated:
-            sim_state.status = "aborted"
-            print(f"[SERVER] Drone returned to home after abort")
-        elif sim_state.status != "aborted":
-            sim_state.status = "completed"
-            print(f"[SERVER] Mission completed for {farm['name']}")
-        
-        # Let physics settle
-        for _ in range(100):
-            p.stepSimulation()
-            time.sleep(1.0 / SIM_HZ)
-    
-    except Exception as e:
-        print(f"[SERVER] Simulation error: {e}")
-        sim_state.status = "error"
-    
-    finally:
-        sim_state.is_running = False
-        sim_state.is_paused = False
-        if p.isConnected():
-            p.disconnect()
+# ================= MAIN =================
 
 if __name__ == '__main__':
-    # Add some default farms for testing
+    # Add default test farms
     farms_db.append({
         'id': 1,
         'name': 'North Field Farm',
         'location': 'Sector A1',
-        'boundaries': {'min_x': -2, 'min_y': -2, 'max_x': 2, 'max_y': 2},
+        'boundaries': {'min_x': -3, 'min_y': -3, 'max_x': 3, 'max_y': 3},
         'created_at': time.strftime('%Y-%m-%d %H:%M:%S')
     })
     
-    print("🚁 Farm Drone Inspection Server Starting...")
-    print("📡 Server running on http://localhost:5000")
+    print("🚀 Farm Drone Inspection Server Starting...")
+    print("🔗 Server running on http://localhost:5000")
     app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

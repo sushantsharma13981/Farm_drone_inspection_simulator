@@ -6,6 +6,8 @@ let farms = [];
 let selectedFarm = null;
 let isDrawingMode = false;
 let statusPollInterval = null;
+let cameraStreamActive = false;
+let resultsLoaded = false;
 
 // DOM Elements
 const elements = {
@@ -35,9 +37,19 @@ const elements = {
     dronePosition: document.getElementById('dronePosition'),
     droneWaypoint: document.getElementById('droneWaypoint'),
     activeFarm: document.getElementById('activeFarm'),
-    totalFarms: document.getElementById('totalFarms'),
-    activeMissions: document.getElementById('activeMissions'),
-    systemLog: document.getElementById('systemLog')
+    systemLog: document.getElementById('systemLog'),
+    cameraStream: document.getElementById('cameraStream'),
+    cameraPlaceholder: document.getElementById('cameraPlaceholder'),
+    aiDetection: document.getElementById('aiDetection'),
+    aiDetectionRow: document.getElementById('aiDetectionRow'),
+    
+    // Results
+    resultsSection: document.getElementById('resultsSection'),
+    resultsSummary: document.getElementById('resultsSummary'),
+    heatmapImage: document.getElementById('heatmapImage'),
+    detectionsTable: document.getElementById('detectionsTable'),
+    exportBtn: document.getElementById('exportBtn'),
+    clearResultsBtn: document.getElementById('clearResultsBtn')
 };
 
 // ============= INITIALIZATION =============
@@ -108,7 +120,6 @@ async function loadFarms() {
         const result = await apiCall('/farms');
         farms = result.farms;
         updateFarmsList();
-        updateDatabaseStats();
         logMessage(`Loaded ${farms.length} farms`);
     } catch (error) {
         logMessage('Failed to load farms', 'error');
@@ -120,7 +131,6 @@ async function addFarm(farmData) {
         const result = await apiCall('/farms', 'POST', farmData);
         farms.push(result.farm);
         updateFarmsList();
-        updateDatabaseStats();
         logMessage(`Added farm: ${result.farm.name}`, 'success');
         return result.farm;
     } catch (error) {
@@ -138,7 +148,6 @@ async function deleteFarm(farmId) {
             elements.deployBtn.disabled = true;
         }
         updateFarmsList();
-        updateDatabaseStats();
         logMessage('Farm deleted', 'success');
     } catch (error) {
         logMessage('Failed to delete farm', 'error');
@@ -157,6 +166,7 @@ async function deployDrone() {
         });
         logMessage(`Drone deployed to ${selectedFarm.name}`, 'success');
         updateControlButtons('flying');
+        resultsLoaded = false;
     } catch (error) {
         logMessage('Failed to deploy drone', 'error');
     }
@@ -195,13 +205,167 @@ async function pollDroneStatus() {
         // Update control buttons based on status
         if (status.is_running) {
             updateControlButtons(status.status);
+            startCameraStream();
         } else {
             updateControlButtons('idle');
+            stopCameraStream();
+            
+            // Load results if mission just completed
+            if (!resultsLoaded && (status.status === 'completed' || status.status === 'aborted')) {
+                resultsLoaded = true;
+                await loadResults();
+            }
         }
     } catch (error) {
         // Connection lost
         elements.connectionStatus.classList.add('disconnected');
         elements.connectionText.textContent = 'Connection Lost';
+        stopCameraStream();
+    }
+}
+
+// ============= RESULTS FUNCTIONS =============
+
+async function loadResults() {
+    try {
+        logMessage('Loading mission results...', 'info');
+        
+        // Show results section
+        elements.resultsSection.style.display = 'block';
+        
+        // Load summary
+        const summaryResult = await apiCall('/results/summary');
+        displaySummary(summaryResult.summary);
+        
+        // Load heatmap
+        const heatmapResult = await apiCall('/results/heatmap');
+        elements.heatmapImage.src = 'data:image/png;base64,' + heatmapResult.heatmap;
+        
+        // Load detections
+        const detectionsResult = await apiCall('/results/detections');
+        displayDetections(detectionsResult.detections);
+        
+        logMessage('Mission results loaded successfully', 'success');
+    } catch (error) {
+        logMessage('Failed to load results: ' + error.message, 'error');
+    }
+}
+
+function displaySummary(summary) {
+    let html = '<div class="summary-grid">';
+    
+    if (Object.keys(summary).length === 0) {
+        html += '<p class="no-data">No detections recorded during this mission</p>';
+    } else {
+        for (const [disease, data] of Object.entries(summary)) {
+            const diseaseColor = getDiseaseColor(disease);
+            html += `
+                <div class="summary-card" style="border-left-color: rgb(${diseaseColor.join(',')})">
+                    <div class="disease-name">${disease}</div>
+                    <div class="disease-count">${data.count} detected</div>
+                    <div class="disease-confidence">Avg: ${data.avg_confidence}%</div>
+                </div>
+            `;
+        }
+    }
+    
+    html += '</div>';
+    elements.resultsSummary.innerHTML = html;
+}
+
+function displayDetections(detections) {
+    if (detections.length === 0) {
+        elements.detectionsTable.innerHTML = '<p class="no-data">No detections recorded</p>';
+        return;
+    }
+    
+    let html = '<table class="detections-table-actual"><thead><tr>';
+    html += '<th>Disease</th><th>Location (X, Y)</th><th>Confidence</th><th>Timestamp</th>';
+    html += '</tr></thead><tbody>';
+    
+    for (const detection of detections) {
+        const diseaseColor = getDiseaseColor(detection.disease);
+        const timestamp = new Date(detection.timestamp).toLocaleTimeString();
+        html += `<tr>
+            <td><span class="disease-badge" style="background-color: rgb(${diseaseColor.join(',')})">
+                ${detection.disease}
+            </span></td>
+            <td>(${detection.x.toFixed(2)}, ${detection.y.toFixed(2)})</td>
+            <td>${(detection.confidence * 100).toFixed(1)}%</td>
+            <td>${timestamp}</td>
+        </tr>`;
+    }
+    
+    html += '</tbody></table>';
+    elements.detectionsTable.innerHTML = html;
+}
+
+function getDiseaseColor(disease) {
+    const colors = {
+        'HEALTHY': [0, 255, 0],
+        'EARLY BLIGHT': [0, 165, 255],
+        'LATE BLIGHT': [0, 0, 255],
+        'LEAF MINER': [255, 0, 0],
+        'LEAF MOLD': [255, 165, 0],
+        'MOSAIC VIRUS': [128, 0, 128],
+        'SEPTORIA': [255, 192, 203],
+        'SPIDER MITES': [165, 42, 42],
+        'YELLOW LEAF CURL': [0, 255, 255],
+        'BACTERIAL SPOT': [139, 69, 19],
+        'NO DETECTION': [128, 128, 128]
+    };
+    return colors[disease] || [128, 128, 128];
+}
+
+async function exportResults() {
+    try {
+        const result = await apiCall('/results/export');
+        const dataStr = JSON.stringify(result, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `mission_results_${new Date().getTime()}.json`;
+        link.click();
+        logMessage('Results exported successfully', 'success');
+    } catch (error) {
+        logMessage('Failed to export results', 'error');
+    }
+}
+
+async function clearResults() {
+    if (!confirm('Clear all mission results?')) {
+        return;
+    }
+    
+    try {
+        await apiCall('/results/clear', 'POST');
+        elements.resultsSection.style.display = 'none';
+        resultsLoaded = false;
+        logMessage('Results cleared', 'success');
+    } catch (error) {
+        logMessage('Failed to clear results', 'error');
+    }
+}
+
+// ============= CAMERA STREAMING =============
+
+function startCameraStream() {
+    if (!cameraStreamActive) {
+        cameraStreamActive = true;
+        elements.cameraStream.src = `${API_BASE_URL.replace('/api', '')}/api/camera/stream?t=${Date.now()}`;
+        elements.cameraStream.classList.add('active');
+        elements.cameraPlaceholder.classList.add('hidden');
+        logMessage('Camera stream started', 'success');
+    }
+}
+
+function stopCameraStream() {
+    if (cameraStreamActive) {
+        cameraStreamActive = false;
+        elements.cameraStream.src = '';
+        elements.cameraStream.classList.remove('active');
+        elements.cameraPlaceholder.classList.remove('hidden');
     }
 }
 
@@ -268,8 +432,26 @@ function updateDroneStatus(status) {
     // Update active farm
     elements.activeFarm.textContent = status.current_farm ? status.current_farm.name : 'None';
     
-    // Update active missions count
-    elements.activeMissions.textContent = status.is_running ? '1' : '0';
+    // Update AI detection if available
+    if (status.ai_available && status.is_running) {
+        elements.aiDetectionRow.style.display = 'flex';
+        let aiText = status.ai_diagnosis || 'SCANNING...';
+        if (status.ai_confidence && status.ai_confidence > 0) {
+            aiText += ` (${status.ai_confidence}%)`;
+        }
+        elements.aiDetection.textContent = aiText;
+        
+        // Color based on health status
+        if (status.ai_diagnosis === 'HEALTHY') {
+            elements.aiDetection.style.color = '#48bb78';
+        } else if (status.ai_diagnosis && status.ai_diagnosis !== 'SCANNING...' && status.ai_diagnosis !== 'NO DETECTION') {
+            elements.aiDetection.style.color = '#f56565';
+        } else {
+            elements.aiDetection.style.color = '#a0aec0';
+        }
+    } else {
+        elements.aiDetectionRow.style.display = 'none';
+    }
 }
 
 function updateControlButtons(status) {
@@ -306,10 +488,6 @@ function updateControlButtons(status) {
             logMessage(`Mission ${status}!`, status === 'completed' ? 'success' : 'warning');
             break;
     }
-}
-
-function updateDatabaseStats() {
-    elements.totalFarms.textContent = farms.length;
 }
 
 function getStatusColor(status) {
@@ -349,23 +527,19 @@ function drawBoundaries() {
     const width = canvas.width;
     const height = canvas.height;
     
-    // Clear canvas
     ctx.clearRect(0, 0, width, height);
     
-    // Get boundary values
     const minX = parseFloat(elements.minX.value);
     const minY = parseFloat(elements.minY.value);
     const maxX = parseFloat(elements.maxX.value);
     const maxY = parseFloat(elements.maxY.value);
     
-    // Calculate scale and offset
     const rangeX = maxX - minX;
     const rangeY = maxY - minY;
     const scale = Math.min((width - 40) / rangeX, (height - 40) / rangeY);
     const offsetX = 20;
     const offsetY = 20;
     
-    // Transform coordinates to canvas space
     const toCanvasX = (x) => offsetX + (x - minX) * scale;
     const toCanvasY = (y) => height - (offsetY + (y - minY) * scale);
     
@@ -401,7 +575,6 @@ function drawBoundaries() {
     ctx.arc(toCanvasX(0), toCanvasY(0), 5, 0, Math.PI * 2);
     ctx.fill();
     
-    // Label origin
     ctx.fillStyle = '#2d3748';
     ctx.font = '12px sans-serif';
     ctx.fillText('(0,0)', toCanvasX(0) + 8, toCanvasY(0) - 8);
@@ -434,7 +607,6 @@ function setupEventListeners() {
         
         try {
             await addFarm(farmData);
-            // Clear form
             elements.farmName.value = '';
             elements.farmLocation.value = '';
             clearCanvas();
@@ -446,7 +618,7 @@ function setupEventListeners() {
         }
     });
     
-    // Boundary inputs - redraw on change
+    // Boundary inputs
     [elements.minX, elements.minY, elements.maxX, elements.maxY].forEach(input => {
         input.addEventListener('input', () => {
             if (isDrawingMode) {
@@ -459,12 +631,37 @@ function setupEventListeners() {
     elements.deployBtn.addEventListener('click', deployDrone);
     elements.stallBtn.addEventListener('click', stallDrone);
     elements.abortBtn.addEventListener('click', abortDrone);
+    
+    // Results tabs
+    document.querySelectorAll('.results-tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const tabName = e.target.dataset.tab;
+            switchResultsTab(tabName);
+        });
+    });
+    
+    // Export and clear buttons
+    elements.exportBtn.addEventListener('click', exportResults);
+    elements.clearResultsBtn.addEventListener('click', clearResults);
+}
+
+function switchResultsTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.results-tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.results-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+    event.target.classList.add('active');
 }
 
 // ============= POLLING =============
 
 function startStatusPolling() {
-    // Poll every 500ms
     statusPollInterval = setInterval(pollDroneStatus, 500);
 }
 
@@ -485,7 +682,6 @@ function logMessage(message, type = 'info') {
     elements.systemLog.appendChild(logEntry);
     elements.systemLog.scrollTop = elements.systemLog.scrollHeight;
     
-    // Keep only last 50 entries
     while (elements.systemLog.children.length > 50) {
         elements.systemLog.removeChild(elements.systemLog.firstChild);
     }
@@ -493,14 +689,13 @@ function logMessage(message, type = 'info') {
 
 // ============= START APPLICATION =============
 
-// Initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initialize);
 } else {
     initialize();
 }
 
-// Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     stopStatusPolling();
+    stopCameraStream();
 });
