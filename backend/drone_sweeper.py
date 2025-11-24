@@ -173,19 +173,22 @@ def setup_pro_field(field_min, field_max):
     print(f"🌱 Planted {count} plants")
     return 0.8
 
-def setup_simulation_gui(drone_urdf_path=DRONE_URDF):
+def setup_simulation_gui(drone_urdf_path=DRONE_URDF, start_pos=None):
     """Setup PyBullet simulation WITH GUI"""
     if p.isConnected():
         p.disconnect()
     
-    p.connect(p.GUI)  # GUI MODE - visible window
+    p.connect(p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.81)
     p.setPhysicsEngineParameter(fixedTimeStep=1.0/240.0)
     
     plane_id = p.loadURDF("plane.urdf")
     
-    start_pos = [0, 0, 0.1]
+    # Use provided start position or default
+    if start_pos is None:
+        start_pos = [0, 0, 0.1]
+    
     start_orn = p.getQuaternionFromEuler([0, 0, 0])
     drone_id = p.loadURDF(drone_urdf_path, start_pos, start_orn)
     
@@ -339,10 +342,18 @@ class DiseaseDetectionMap:
 
 # ================= NAVIGATION =================
 def get_sweep_waypoints(start_pos, field_min, field_max, z_hover, sweep_step):
-    """Generate sweep waypoints for the field"""
+    """Generate sweep waypoints for the field - STARTING FROM GROUND WITH TAKEOFF"""
     waypoints = []
     
-    waypoints.append(np.array([start_pos[0], start_pos[1], z_hover]))
+    # MODIFIED: Start from ground position behind the corner
+    start_x = field_min[0] - 1.0  # One block behind
+    start_y = field_min[1] - 1.0
+    
+    # Takeoff sequence
+    waypoints.append(np.array([start_x, start_y, 0.05]))  # Ground
+    waypoints.append(np.array([start_x, start_y, z_hover]))  # Takeoff to hover altitude
+    
+    # Move to first corner
     waypoints.append(np.array([field_min[0], field_min[1], z_hover]))
 
     x_min, y_min = field_min
@@ -364,8 +375,9 @@ def get_sweep_waypoints(start_pos, field_min, field_max, z_hover, sweep_step):
         
         going_right = not going_right
 
-    waypoints.append(np.array([start_pos[0], start_pos[1], z_hover]))
-    waypoints.append(np.array([start_pos[0], start_pos[1], 0.05]))
+    # Return to start position and land (2nd last and last waypoints)
+    waypoints.append(np.array([start_x, start_y, z_hover]))  # 2nd last waypoint
+    waypoints.append(np.array([start_x, start_y, 0.05]))     # Last waypoint (landing)
     
     return waypoints
 
@@ -416,24 +428,26 @@ def run_drone_simulation_flask(farm, sim_state):
         ai_enabled = False
     
     try:
-        # Setup simulation WITH GUI
-        drone_id, _ = setup_simulation_gui()
+        # Flight parameters
+        HOVER_ALTITUDE = 0.8 + 0.6
+        SWEEP_STEP = 0.8
+        CRUISE_SPEED = 0.5
+        WAIT_TIME_AT_CORNER = 1.0
+        
+        # MODIFIED: Start on ground one block behind the corner
+        start_x = field_min[0] - 1.0  # One block behind
+        start_y = field_min[1] - 1.0
+        start_pos = [start_x, start_y, 0.05]  # Ground level
+        
+        # Setup simulation WITH GUI and spawn drone at starting position (on ground)
+        drone_id, _ = setup_simulation_gui(start_pos=start_pos)
         sim_state.drone_id = drone_id
         draw_field_boundaries(field_min, field_max)
         
         # Setup field
         plant_height = setup_pro_field(field_min, field_max)
         
-        # Flight parameters
-        HOVER_ALTITUDE = plant_height + 0.6
-        SWEEP_STEP = 0.8
-        CRUISE_SPEED = 0.5
-        WAIT_TIME_AT_CORNER = 1.0
-        
-        start_x = field_min[0] - 1.0
-        start_y = field_min[1] - 1.0
-        start_pos = [start_x, start_y, 0.2]
-        
+        # Generate waypoints (now starting from ground with takeoff)
         waypoints = get_sweep_waypoints(start_pos, field_min, field_max, HOVER_ALTITUDE, SWEEP_STEP)
         sim_state.total_waypoints = len(waypoints)
         
@@ -441,7 +455,7 @@ def run_drone_simulation_flask(farm, sim_state):
         
         # Trajectory state
         current_wp_idx = 0
-        virtual_pos = np.array(start_pos)
+        virtual_pos = np.array(start_pos)  # Start from the corner position
         target_vel = np.zeros(3)
         wait_timer = 0.0
         is_waiting = False
@@ -449,7 +463,7 @@ def run_drone_simulation_flask(farm, sim_state):
         
         abort_initiated = False
         
-        print(f"[SIMULATOR] Mission setup complete. Waypoints: {len(waypoints)}")
+        print(f"[SIMULATOR] Mission setup complete. Starting from ground at {start_pos}. Waypoints: {len(waypoints)}")
         
         while current_wp_idx < len(waypoints):
             # Check for abort command
@@ -529,8 +543,11 @@ def run_drone_simulation_flask(farm, sim_state):
                 try:
                     frame = get_drone_view(drone_id)
                     
-                    # Run AI detection if enabled
-                    if ai_enabled and not abort_initiated:
+                    # MODIFIED: Only run AI detection if enabled, not aborted, and NOT in return/landing phase
+                    # Check if we're in the last 2 waypoints (returning home)
+                    is_returning_home = current_wp_idx >= len(waypoints) - 2
+                    
+                    if ai_enabled and not abort_initiated and not is_returning_home:
                         results = detector(frame, verbose=False, conf=0.15)[0]
                         boxes = results.boxes.xyxy.cpu().numpy()
                         
@@ -568,6 +585,10 @@ def run_drone_simulation_flask(farm, sim_state):
                                     )
                         else:
                             sim_state.ai_diagnosis = "NO DETECTION"
+                    elif is_returning_home:
+                        # Clear AI status when returning home
+                        sim_state.ai_diagnosis = "RETURNING HOME"
+                        sim_state.ai_confidence = 0.0
                     
                     # Add status overlay
                     cv2.rectangle(frame, (0, 0), (640, 80), (0, 0, 0), -1)
