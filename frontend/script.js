@@ -286,21 +286,29 @@ function displaySummary(summary) {
     
     let totalDetections = 0;
     let healthyCount = 0;
+    let diseaseCount = 0;
 
     if (Object.keys(summary).length === 0) {
         html += '<p class="no-data">No detections recorded during this mission</p>';
     } else {
         for (const [disease, data] of Object.entries(summary)) {
             const diseaseColor = getDiseaseColor(disease);
-            totalDetections += data.count || 0;
-            if (disease === 'HEALTHY') {
-                healthyCount += data.count || 0;
+            const count = data.count || 0;
+            totalDetections += count;
+            
+            // Case-insensitive check for HEALTHY
+            const diseaseUpper = disease.toUpperCase().trim();
+            if (diseaseUpper === 'HEALTHY') {
+                healthyCount += count;
+                console.log(`Found HEALTHY: ${count} detections`);
+            } else {
+                diseaseCount += count;
             }
 
             html += `
                 <div class="summary-card" style="border-left-color: rgb(${diseaseColor.join(',')})">
                     <div class="disease-name">${disease}</div>
-                    <div class="disease-count">${data.count} detected</div>
+                    <div class="disease-count">${count} detected</div>
                     <div class="disease-confidence">Avg: ${data.avg_confidence}%</div>
                 </div>
             `;
@@ -309,23 +317,40 @@ function displaySummary(summary) {
     
     html += '</div>';
 
-    // Health score card
+    // Debug logging
+    console.log(`Health Score Calculation: ${healthyCount} healthy / ${totalDetections} total = ${totalDetections > 0 ? Math.round((healthyCount / totalDetections) * 100) : 0}%`);
+
+    // Health score card - ALWAYS show if there are detections
     let healthScoreHtml = '';
     if (totalDetections > 0) {
         const score = Math.round((healthyCount / totalDetections) * 100);
         let statusText = 'Critical';
-        if (score >= 80) statusText = 'Excellent';
-        else if (score >= 60) statusText = 'Good';
-        else if (score >= 40) statusText = 'Moderate';
+        let statusColor = '#e53e3e';
+        
+        if (score >= 80) {
+            statusText = 'Excellent';
+            statusColor = '#48bb78';
+        } else if (score >= 60) {
+            statusText = 'Good';
+            statusColor = '#68d391';
+        } else if (score >= 40) {
+            statusText = 'Moderate';
+            statusColor = '#ed8936';
+        } else if (score >= 20) {
+            statusText = 'Poor';
+            statusColor = '#f56565';
+        }
 
         healthScoreHtml = `
             <div class="health-score-card">
                 <div class="health-score-main">
                     <span class="health-score-label">Field Health Score</span>
-                    <span class="health-score-value">${score}%</span>
+                    <span class="health-score-value" style="color: ${statusColor}">${score}%</span>
                 </div>
-                <div class="health-score-status">${statusText}</div>
-                <div class="health-score-sub">Based on ${totalDetections} detections</div>
+                <div class="health-score-status" style="color: ${statusColor}">${statusText}</div>
+                <div class="health-score-sub">
+                    ${healthyCount} healthy / ${diseaseCount} diseased (${totalDetections} total)
+                </div>
             </div>
         `;
     }
