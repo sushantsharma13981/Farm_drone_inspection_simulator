@@ -299,46 +299,44 @@ class DiseaseDetectionMap:
             return json.loads(json.dumps(self.detections, default=str))
     
     def create_heatmap_image(self, width=600, height=600):
-        """Create heatmap visualization"""
-        heatmap = np.zeros((height, width, 3), dtype=np.uint8)
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap
         
-        # Draw background (field area)
-        heatmap[:, :] = (240, 240, 240)
+        # Gradient colormap: Green → Yellow → Red
+        colors = [(0, 1, 0), (1, 1, 0), (1, 0, 0)]
+        cmap = LinearSegmentedColormap.from_list("severityMap", colors, N=256)
+
+        # Grid size
+        heat = np.zeros((self.height, self.width))
         
-        # Draw grid
-        cell_pixel_w = width / self.width
-        cell_pixel_h = height / self.height
+        # Fill intensity map (count or avg confidence)
+        for (gx, gy), items in self.grid.items():
+            if items:
+                conf = np.mean([d['confidence'] for d in items])
+                heat[gy, gx] = conf
         
-        for i in range(self.width + 1):
-            x = int(i * cell_pixel_w)
-            cv2.line(heatmap, (x, 0), (x, height), (200, 200, 200), 1)
+        # Plot heatmap
+        fig, ax = plt.subplots(figsize=(6, 6))
+        hm = ax.imshow(heat, cmap=cmap, origin="lower")
         
-        for i in range(self.height + 1):
-            y = int(i * cell_pixel_h)
-            cv2.line(heatmap, (0, y), (width, y), (200, 200, 200), 1)
-        
-        # Draw detections
-        with self.lock:
-            for detection in self.detections:
-                # Convert world coordinates to pixel coordinates
-                rel_x = (detection['x'] - self.field_min[0]) / (self.field_max[0] - self.field_min[0])
-                rel_y = (detection['y'] - self.field_min[1]) / (self.field_max[1] - self.field_min[1])
-                
-                px = int(rel_x * width)
-                py = int(rel_y * height)
-                
-                # Clamp to bounds
-                px = max(0, min(width - 1, px))
-                py = max(0, min(height - 1, py))
-                
-                disease = detection['disease']
-                color = DISEASE_COLORS.get(disease, (128, 128, 128))
-                
-                # Draw circle with disease color
-                cv2.circle(heatmap, (px, py), 8, color, -1)
-                cv2.circle(heatmap, (px, py), 8, (0, 0, 0), 2)
-        
-        return heatmap
+        ax.set_title("Disease Heatmap")
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        # Add color bar with labels
+        cbar = plt.colorbar(hm, fraction=0.046, pad=0.04)
+        cbar.set_label("Disease Severity / Avg Confidence", fontsize=10)
+        cbar.set_ticks([0, 0.5, 1.0])
+        cbar.set_ticklabels(["Low", "Medium", "High"])
+
+        # Save to image buffer
+        fig.canvas.draw()
+        img = np.array(fig.canvas.renderer.buffer_rgba())
+        plt.close(fig)
+
+        return cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
 
 # ================= NAVIGATION =================
 def get_sweep_waypoints(start_pos, field_min, field_max, z_hover, sweep_step):
