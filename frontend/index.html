@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Farm Drone Inspection System</title>
     <link rel="stylesheet" href="style.css">
+
+    <!-- Plotly for expert interactive heatmap -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -158,19 +161,21 @@
                     <!-- Summary Tab -->
                     <div class="results-tab-content active" id="summary-tab">
                         <div id="resultsSummary" class="results-summary">
-                            <p class="loading">Loading results...</p>
+                            <p class="loading">Loading results.</p>
                         </div>
                     </div>
                     
                     <!-- Heatmap Tab -->
                     <div class="results-tab-content" id="heatmap-tab">
+                        <!-- Normal quick-glance heatmap (PNG from backend) -->
                         <img id="heatmapImage" class="heatmap-image" alt="Disease Heatmap" />
+                        <p class="heatmap-hint">Click the heatmap for expert interactive view.</p>
                     </div>
                     
                     <!-- Detections Tab -->
                     <div class="results-tab-content" id="detections-tab">
                         <div id="detectionsTable" class="detections-table">
-                            <p class="loading">Loading detections...</p>
+                            <p class="loading">Loading detections.</p>
                         </div>
                     </div>
                     
@@ -182,9 +187,42 @@
             </div>
         </div>
 
-        <!-- Bottom Panel: System Log -->
+        <!-- Expert Interactive Heatmap Modal (overlay) -->
+        <div id="heatmapModal" class="heatmap-modal">
+            <div class="heatmap-modal-content">
+                <div class="heatmap-modal-header">
+                    <div class="heatmap-modal-title">Expert Heatmap View</div>
+                    <div class="heatmap-modal-header-actions">
+                        <button class="btn btn-secondary btn-sm" id="downloadHeatmapBtn">⬇ Download PNG</button>
+                        <button id="closeHeatmapModal" class="modal-close">&times;</button>
+                    </div>
+                </div>
+
+                <div class="heatmap-modal-controls">
+                    <span class="filter-label">Filter diseases:</span>
+                    <div id="diseaseFilterContainer" class="filter-chips">
+                        <!-- Chips injected by JS -->
+                    </div>
+                </div>
+
+                <div id="heatmapInteractive" class="heatmap-interactive"></div>
+            </div>
+        </div>
+
+        <!-- Remedies / Recommendations space above logs -->
+            <div class="remedies-section" id="remediesSection">
+                <h3>Suggested Remedies</h3>
+                <div id="remediesContent" class="remedies-content">
+                    <p class="no-data">Run a mission to see recommended remedies for detected diseases.</p>
+                </div>
+            </div>
+            
+        <!-- Bottom Panel: System Log + Remedies -->
         <div class="panel log-panel">
             <h2 class="panel-title">SYSTEM LOG</h2>
+
+            
+
             <div class="log-container" id="systemLog">
                 <div class="log-entry">System initialized</div>
                 <div class="log-entry">Waiting for commands...</div>

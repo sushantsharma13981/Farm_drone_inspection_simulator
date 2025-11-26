@@ -9,6 +9,11 @@ let statusPollInterval = null;
 let cameraStreamActive = false;
 let resultsLoaded = false;
 
+// Expert view state
+let lastDetections = [];
+let diseaseFilters = new Set();
+let interactiveHeatmapReady = false;
+
 // DOM Elements
 const elements = {
     // Connection
@@ -49,7 +54,18 @@ const elements = {
     heatmapImage: document.getElementById('heatmapImage'),
     detectionsTable: document.getElementById('detectionsTable'),
     exportBtn: document.getElementById('exportBtn'),
-    clearResultsBtn: document.getElementById('clearResultsBtn')
+    clearResultsBtn: document.getElementById('clearResultsBtn'),
+
+    // Remedies
+    remediesSection: document.getElementById('remediesSection'),
+    remediesContent: document.getElementById('remediesContent'),
+
+    // Expert heatmap modal
+    heatmapModal: document.getElementById('heatmapModal'),
+    heatmapInteractive: document.getElementById('heatmapInteractive'),
+    closeHeatmapModal: document.getElementById('closeHeatmapModal'),
+    diseaseFilterContainer: document.getElementById('diseaseFilterContainer'),
+    downloadHeatmapBtn: document.getElementById('downloadHeatmapBtn')
 };
 
 // ============= INITIALIZATION =============
@@ -236,14 +252,19 @@ async function loadResults() {
         // Load summary
         const summaryResult = await apiCall('/results/summary');
         displaySummary(summaryResult.summary);
-        
-        // Load heatmap
-        const heatmapResult = await apiCall('/results/heatmap');
-        elements.heatmapImage.src = 'data:image/png;base64,' + heatmapResult.heatmap;
-        
-        // Load detections
+
+        // Load quick-glance heatmap (PNG)
+        await loadStaticHeatmap();
+
+        // Load detections (used for table, remedies & expert view)
         const detectionsResult = await apiCall('/results/detections');
-        displayDetections(detectionsResult.detections);
+        lastDetections = detectionsResult.detections || [];
+        displayDetections(lastDetections);
+
+        // Update remedies and filters for expert mode
+        updateRemediesFromSummary(summaryResult.summary);
+        setupDiseaseFilters(lastDetections);
+        interactiveHeatmapReady = true;
         
         logMessage('Mission results loaded successfully', 'success');
     } catch (error) {
@@ -251,14 +272,31 @@ async function loadResults() {
     }
 }
 
+async function loadStaticHeatmap() {
+    try {
+        const heatmapResult = await apiCall('/results/heatmap');
+        elements.heatmapImage.src = 'data:image/png;base64,' + heatmapResult.heatmap;
+    } catch (err) {
+        logMessage('Failed to load heatmap preview', 'warning');
+    }
+}
+
 function displaySummary(summary) {
     let html = '<div class="summary-grid">';
     
+    let totalDetections = 0;
+    let healthyCount = 0;
+
     if (Object.keys(summary).length === 0) {
         html += '<p class="no-data">No detections recorded during this mission</p>';
     } else {
         for (const [disease, data] of Object.entries(summary)) {
             const diseaseColor = getDiseaseColor(disease);
+            totalDetections += data.count || 0;
+            if (disease === 'HEALTHY') {
+                healthyCount += data.count || 0;
+            }
+
             html += `
                 <div class="summary-card" style="border-left-color: rgb(${diseaseColor.join(',')})">
                     <div class="disease-name">${disease}</div>
@@ -270,11 +308,33 @@ function displaySummary(summary) {
     }
     
     html += '</div>';
-    elements.resultsSummary.innerHTML = html;
+
+    // Health score card
+    let healthScoreHtml = '';
+    if (totalDetections > 0) {
+        const score = Math.round((healthyCount / totalDetections) * 100);
+        let statusText = 'Critical';
+        if (score >= 80) statusText = 'Excellent';
+        else if (score >= 60) statusText = 'Good';
+        else if (score >= 40) statusText = 'Moderate';
+
+        healthScoreHtml = `
+            <div class="health-score-card">
+                <div class="health-score-main">
+                    <span class="health-score-label">Field Health Score</span>
+                    <span class="health-score-value">${score}%</span>
+                </div>
+                <div class="health-score-status">${statusText}</div>
+                <div class="health-score-sub">Based on ${totalDetections} detections</div>
+            </div>
+        `;
+    }
+
+    elements.resultsSummary.innerHTML = healthScoreHtml + html;
 }
 
 function displayDetections(detections) {
-    if (detections.length === 0) {
+    if (!detections || detections.length === 0) {
         elements.detectionsTable.innerHTML = '<p class="no-data">No detections recorded</p>';
         return;
     }
@@ -300,6 +360,7 @@ function displayDetections(detections) {
     elements.detectionsTable.innerHTML = html;
 }
 
+// Disease colors (also reused for remedies)
 function getDiseaseColor(disease) {
     const colors = {
         'HEALTHY': [0, 255, 0],
@@ -316,6 +377,60 @@ function getDiseaseColor(disease) {
     };
     return colors[disease] || [128, 128, 128];
 }
+
+// Simple remedy suggestions per disease
+const DISEASE_REMEDIES = {
+    'HEALTHY': 'Crop looks healthy – maintain current practices and keep monitoring.',
+    'EARLY BLIGHT': 'Remove infected leaves, avoid overhead irrigation and apply recommended fungicide (e.g., chlorothalonil/copper-based).',
+    'LATE BLIGHT': 'Remove and destroy infected plants, improve air circulation and apply systemic fungicide quickly.',
+    'LEAF MINER': 'Use yellow sticky traps, remove heavily affected leaves and consider selective insecticides if severe.',
+    'LEAF MOLD': 'Improve ventilation, reduce humidity and apply appropriate fungicide on upper and lower leaf surfaces.',
+    'MOSAIC VIRUS': 'Remove and destroy infected plants, control insect vectors and use virus-free seeds/transplants.',
+    'SEPTORIA': 'Remove lower infected leaves, avoid water splash on foliage and spray protectant fungicides.',
+    'SPIDER MITES': 'Increase humidity, wash leaves with water and use miticides or neem oil if infestation is high.',
+    'YELLOW LEAF CURL': 'Remove infected plants, control whiteflies and plant resistant/tolerant varieties where possible.',
+    'BACTERIAL SPOT': 'Avoid overhead watering, remove badly infected leaves and use copper-based bactericides if needed.'
+};
+
+function updateRemediesFromSummary(summary) {
+    if (!elements.remediesContent) return;
+
+    const entries = Object.entries(summary);
+    if (!entries.length) {
+        elements.remediesContent.innerHTML = '<p class="no-data">No disease detected — no remedies required.</p>';
+        return;
+    }
+
+    // Sort by count (most problematic first)
+    const sorted = entries
+        .filter(([disease]) => disease !== 'HEALTHY')
+        .sort((a, b) => (b[1].count || 0) - (a[1].count || 0));
+
+    const topProblems = sorted.slice(0, 3);
+
+    if (!topProblems.length) {
+        elements.remediesContent.innerHTML = '<p class="no-data">Only healthy detections observed — keep monitoring.</p>';
+        return;
+    }
+
+    let html = '';
+    for (const [disease, data] of topProblems) {
+        const color = getDiseaseColor(disease);
+        const remedyText = DISEASE_REMEDIES[disease] || 'Follow integrated pest management and consult agronomy guidelines.';
+        html += `
+            <div class="remedy-item">
+                <span class="remedy-tag" style="background-color: rgba(${color.join(',')}, 0.15); border: 1px solid rgba(${color.join(',')}, 0.5);">
+                    ${disease}
+                </span>
+                <span class="remedy-text">${remedyText}</span>
+            </div>
+        `;
+    }
+
+    elements.remediesContent.innerHTML = html;
+}
+
+// ============= EXPORT / CLEAR RESULTS =============
 
 async function exportResults() {
     try {
@@ -342,6 +457,8 @@ async function clearResults() {
         await apiCall('/results/clear', 'POST');
         elements.resultsSection.style.display = 'none';
         resultsLoaded = false;
+        lastDetections = [];
+        elements.remediesContent.innerHTML = '<p class="no-data">Run a mission to see recommended remedies for detected diseases.</p>';
         logMessage('Results cleared', 'success');
     } catch (error) {
         logMessage('Failed to clear results', 'error');
@@ -586,6 +703,161 @@ function clearCanvas() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+// ============= EXPERT HEATMAP VIEW (PLOTLY) =============
+
+function getFilteredDetections() {
+    if (!lastDetections || !lastDetections.length) return [];
+    if (!diseaseFilters || diseaseFilters.size === 0) return lastDetections;
+    return lastDetections.filter(d => diseaseFilters.has(d.disease));
+}
+
+function setupDiseaseFilters(detections) {
+    if (!elements.diseaseFilterContainer) return;
+    if (!detections || !detections.length) {
+        elements.diseaseFilterContainer.innerHTML = '<span class="loading">No detections available.</span>';
+        return;
+    }
+
+    const uniqueDiseases = Array.from(new Set(detections.map(d => d.disease)));
+    diseaseFilters = new Set(uniqueDiseases);
+
+    elements.diseaseFilterContainer.innerHTML = uniqueDiseases.map(d => `
+        <button class="filter-chip active" data-disease="${d}">
+            ${d}
+        </button>
+    `).join('');
+
+    elements.diseaseFilterContainer.querySelectorAll('.filter-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const disease = chip.dataset.disease;
+            if (chip.classList.contains('active')) {
+                chip.classList.remove('active');
+                diseaseFilters.delete(disease);
+            } else {
+                chip.classList.add('active');
+                diseaseFilters.add(disease);
+            }
+            renderInteractiveHeatmap();
+        });
+    });
+}
+
+function openHeatmapModal() {
+    if (!elements.heatmapModal || !interactiveHeatmapReady) {
+        logMessage('Heatmap not ready yet.', 'warning');
+        return;
+    }
+    elements.heatmapModal.classList.add('active');
+    renderInteractiveHeatmap();
+}
+
+function closeHeatmapModal() {
+    if (!elements.heatmapModal) return;
+    elements.heatmapModal.classList.remove('active');
+}
+
+function renderInteractiveHeatmap() {
+    if (!elements.heatmapInteractive || !window.Plotly) return;
+
+    const detections = getFilteredDetections();
+
+    if (!detections.length) {
+        Plotly.newPlot(elements.heatmapInteractive, [], {
+            title: 'Interactive Disease Heatmap',
+            annotations: [{
+                text: 'No detections for current filters.',
+                x: 0.5,
+                y: 0.5,
+                showarrow: false,
+                font: { size: 14 }
+            }],
+            xaxis: { visible: false },
+            yaxis: { visible: false }
+        });
+        return;
+    }
+
+    const x = detections.map(d => d.x);
+    const y = detections.map(d => d.y);
+    const conf = detections.map(d => d.confidence);
+    const text = detections.map(d =>
+        `${d.disease}<br>Conf: ${(d.confidence * 100).toFixed(1)}%<br>(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`
+    );
+
+    // Drone path approximated by detection order (by timestamp)
+    const sortedByTime = [...detections].sort(
+        (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+    );
+    const pathX = sortedByTime.map(d => d.x);
+    const pathY = sortedByTime.map(d => d.y);
+
+    const scatterPoints = {
+        x,
+        y,
+        text,
+        mode: 'markers',
+        type: 'scattergl',
+        marker: {
+            size: 16,
+            color: conf,
+            colorscale: [
+                ['0.0', 'rgb(0,255,0)'],
+                ['0.5', 'rgb(255,255,0)'],
+                ['1.0', 'rgb(255,0,0)']
+            ],
+            colorbar: {
+                title: 'Severity (Confidence)',
+                titleside: 'right',
+                tickvals: [0, 0.5, 1.0],
+                ticktext: ['Low', 'Medium', 'High']
+            }
+        },
+        hovertemplate: '%{text}<extra></extra>',
+        name: 'Detections'
+    };
+
+    const pathTrace = {
+        x: pathX,
+        y: pathY,
+        mode: 'lines+markers',
+        type: 'scattergl',
+        line: { width: 1 },
+        marker: { size: 4 },
+        hoverinfo: 'skip',
+        name: 'Drone path'
+    };
+
+    const layout = {
+        title: 'Interactive Disease Heatmap',
+        dragmode: 'zoom',
+        xaxis: { title: 'Field X', zeroline: false },
+        yaxis: { title: 'Field Y', zeroline: false },
+        paper_bgcolor: '#ffffff',
+        plot_bgcolor: '#f7fafc',
+        legend: { orientation: 'h', y: -0.15 }
+    };
+
+    Plotly.newPlot(elements.heatmapInteractive, [scatterPoints, pathTrace], layout);
+}
+
+async function downloadInteractiveHeatmapImage() {
+    if (!window.Plotly || !elements.heatmapInteractive) return;
+    try {
+        const dataUrl = await Plotly.toImage(elements.heatmapInteractive, {
+            format: 'png',
+            width: 1000,
+            height: 800
+        });
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `heatmap_${Date.now()}.png`;
+        a.click();
+        logMessage('Heatmap image downloaded', 'success');
+    } catch (err) {
+        logMessage('Failed to download heatmap image', 'error');
+    }
+}
+
 // ============= EVENT LISTENERS =============
 
 function setupEventListeners() {
@@ -636,27 +908,47 @@ function setupEventListeners() {
     document.querySelectorAll('.results-tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const tabName = e.target.dataset.tab;
-            switchResultsTab(tabName);
+            switchResultsTab(tabName, e.target);
         });
     });
     
     // Export and clear buttons
     elements.exportBtn.addEventListener('click', exportResults);
     elements.clearResultsBtn.addEventListener('click', clearResults);
+
+    // Heatmap image click -> open expert modal
+    if (elements.heatmapImage) {
+        elements.heatmapImage.addEventListener('click', openHeatmapModal);
+    }
+
+    // Modal close
+    if (elements.closeHeatmapModal && elements.heatmapModal) {
+        elements.closeHeatmapModal.addEventListener('click', closeHeatmapModal);
+        elements.heatmapModal.addEventListener('click', (e) => {
+            if (e.target === elements.heatmapModal) {
+                closeHeatmapModal();
+            }
+        });
+    }
+
+    // Download heatmap button
+    if (elements.downloadHeatmapBtn) {
+        elements.downloadHeatmapBtn.addEventListener('click', downloadInteractiveHeatmapImage);
+    }
 }
 
-function switchResultsTab(tabName) {
+function switchResultsTab(tabName, btn) {
     // Hide all tabs
     document.querySelectorAll('.results-tab-content').forEach(tab => {
         tab.classList.remove('active');
     });
-    document.querySelectorAll('.results-tab-btn').forEach(btn => {
-        btn.classList.remove('active');
+    document.querySelectorAll('.results-tab-btn').forEach(b => {
+        b.classList.remove('active');
     });
     
     // Show selected tab
     document.getElementById(`${tabName}-tab`).classList.add('active');
-    event.target.classList.add('active');
+    if (btn) btn.classList.add('active');
 }
 
 // ============= POLLING =============

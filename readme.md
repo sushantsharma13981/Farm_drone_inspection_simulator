@@ -604,8 +604,9 @@ For technical issues:
 ## Authors
 
 **[Sushant Sharma](https://github.com/sushantsharma13981)** — CAIR, IIT Mandi  
+**[Aashish Negi](https://github.com/sushantsharma13981)** — CAIR, IIT Mandi 
 **[Tanishq Khandelwal](https://github.com/Tanishq5003)** — CAIR, IIT Mandi  
-**[Aashish Negi](https://github.com/sushantsharma13981)** — CAIR, IIT Mandi  
+ 
 
 
 ## Acknowledgments
