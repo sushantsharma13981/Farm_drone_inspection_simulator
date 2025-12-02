@@ -1,5 +1,4 @@
 # Farm Drone Inspection System
-# Farm Drone Inspection System
 
 ## 🎥 Simulation Demos
 Check out the system in action:
