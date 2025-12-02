@@ -1,4 +1,14 @@
 # Farm Drone Inspection System
+# Farm Drone Inspection System
+
+## 🎥 Simulation Demos
+Check out the system in action:
+
+| **Drone Deployment & Flight** | **AI Disease Detection View** |
+|:-----------------------------:|:-----------------------------:|
+| [![Drone Simulation](https://youtu.be/g9YbVTE68nQ)](https://youtu.be/g9YbVTE68nQ) | [![AI View](https://youtube.com/shorts/sXDvJFSJuUQ?feature=share)](https://youtube.com/shorts/sXDvJFSJuUQ?feature=share) |
+| *Autonomous sweep pattern execution* | *Real-time YOLOn, GNN & SAM+LoRA* |
+
 
 ## Overview
 
@@ -25,13 +35,15 @@ Farm_drone_inspection_simulator/
 │   ├── DSLPIDControl.py          # PID controller implementation
 │   ├── enums.py                  # System enumerations
 │   ├── cf2p.urdf                 # Crazyflie 2.0 model definition
-│   └── requirements.txt          # Python dependencies
+│   └── ..............
 │
 ├── frontend/
 │   ├── index.html                # User interface markup
 │   ├── style.css                 # Stylesheet definitions
 │   └── script.js                 # Client-side application logic
 │
+├── requirements.txt          # Python dependencies
+├── quick_setup.md
 └── README.md                     # System documentation
 ```
 
@@ -82,17 +94,16 @@ cd Farm_drone_inspection_simulator
 
 ### 2. Dependency Installation
 
-Navigate to the backend directory and install required Python packages:
+Open the directory and install required Python packages:
 
 ```bash
-cd backend
 pip install -r requirements.txt
 ```
 
 Alternatively, install dependencies individually:
 
 ```bash
-pip install flask==3.0.0 flask-cors==4.0.0 pybullet==3.2.5 numpy==1.24.3 scipy==1.11.3
+pip install flask==3.0.0 flask-cors==4.0.0 pybullet==3.2.5 numpy==1.24.3 scipy==1.11.3 opencv-python==4.8.1.78 torch>=2.0.0 torchvision>=0.15.0 ultralytics>=8.0.0
 ```
 
 ### 3. Environment Configuration
@@ -105,6 +116,12 @@ flask-cors==4.0.0
 pybullet==3.2.5
 numpy==1.24.3
 scipy==1.11.3
+opencv-python==4.8.1.78
+
+#AI
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
 ```
 
 ### 4. File Structure Verification
@@ -508,7 +525,11 @@ pip install --upgrade --force-reinstall -r requirements.txt
 
 ## System Architecture Diagram
 
-```
+The system follows a modular client-server architecture, separating the simulation logic from the user interface and AI processing.
+
+![System Architecture Diagram](sys_architecture.png)
+
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    CLIENT (Web Browser)                     │
 │  ┌──────────────────────┐      ┌──────────────────────┐   │
@@ -604,13 +625,12 @@ For technical issues:
 ## Authors
 
 **[Sushant Sharma](https://github.com/sushantsharma13981)** — CAIR, IIT Mandi  
-**[Aashish Negi](https://github.com/sushantsharma13981)** — CAIR, IIT Mandi 
+**[Aashish Negi](https://github.com/sushantsharma13981)** — CAIR, IIT Mandi  
 **[Tanishq Khandelwal](https://github.com/Tanishq5003)** — CAIR, IIT Mandi  
- 
-
 
 ## Acknowledgments
 
 - PyBullet physics engine development team
 - Flask framework contributors
 - Crazyflie 2.0 platform designers
+- **[Dr. Deepak Raina](https://github.com/deepakraina99)** — CAIR, IIT Mandi
